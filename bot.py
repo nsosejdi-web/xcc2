@@ -15,18 +15,15 @@ from playwright.async_api import async_playwright
 BOT_TOKEN = os.getenv("8685776233:AAGiamvpRxwy4XNBzSfO2MaL1DKZ6YCGeG8", "").strip()
 COLLECT_DELAY = 2
 
+# comma separated env var: ALLOWED_USERS=12345,67890
 allowed_users_raw = os.getenv("ALLOWED_USERS", "").strip()
-ALLOWED_USERS = set(5542815933)
+ALLOWED_USERS = {5542815933}
 
 if allowed_users_raw:
     for item in allowed_users_raw.split(","):
         item = item.strip()
         if item.isdigit():
             ALLOWED_USERS.add(int(item))
-
-# fallback
-if not ALLOWED_USERS:
-    ALLOWED_USERS = {5542815933}
 
 logging.basicConfig(level=logging.INFO)
 router = Router()
@@ -35,41 +32,39 @@ bot_instance: Bot = None
 pending_tasks: dict = {}
 processing_sent: dict = {}
 
-
 # ===================== STATES =====================
 class Flow(StatesGroup):
     collecting_member_list = State()
     waiting_for_tweet_count = State()
     waiting_for_tweet_links = State()
 
-
 # ===================== HELPERS =====================
 
+def ensure_auth_file_exists() -> None:
+    if not os.path.exists("auth.json"):
+        logging.warning("auth.json not found. Some features may not work.")
+
 def validate_env() -> None:
+    logging.info("=== STARTUP DEBUG ===")
+    logging.info("BOT_TOKEN present: %s", bool(BOT_TOKEN))
+    logging.info("BOT_TOKEN length: %s", len(BOT_TOKEN))
+    logging.info("BOT_TOKEN starts with: %s", BOT_TOKEN[:15] if BOT_TOKEN else "EMPTY")
+    logging.info("ALLOWED_USERS: %s", ALLOWED_USERS)
+    logging.info("auth.json exists: %s", os.path.exists("auth.json"))
+    logging.info("Current directory: %s", os.getcwd())
+    logging.info("Files in dir: %s", os.listdir("."))
+
     if not BOT_TOKEN:
         raise ValueError("BOT_TOKEN environment variable is missing.")
-
     if not ALLOWED_USERS:
-        logging.warning("ALLOWED_USERS is empty. Using fallback may be required.")
-
-    if not os.path.exists("auth.json"):
-        logging.warning("auth.json not found. /i/status/ resolving and X scraping may fail.")
-
-
-def has_auth_file() -> bool:
-    return os.path.exists("auth.json")
-
+        raise ValueError("ALLOWED_USERS environment variable is missing or invalid.")
+    ensure_auth_file_exists()
 
 async def resolve_i_status_urls(url_list: list) -> dict:
     i_links = list(set(u for u in url_list if "/i/status/" in u))
     result = {}
 
     if not i_links:
-        return result
-
-    if not has_auth_file():
-        for url in i_links:
-            result[url] = None
         return result
 
     logging.info("Resolving %s /i/status/ links...", len(i_links))
@@ -137,7 +132,6 @@ async def resolve_i_status_urls(url_list: list) -> dict:
                                 candidate = match2.group(1).lower()
                                 if candidate not in ("i", "home", "explore"):
                                     username = candidate
-
                     except Exception:
                         pass
 
@@ -215,7 +209,6 @@ def parse_member_list(text: str, resolved_map: dict = None) -> list:
 
     return members
 
-
 # ===================== HANDLERS =====================
 
 def is_allowed(user_id: int) -> bool:
@@ -246,7 +239,6 @@ async def start_cmd(msg: Message, state: FSMContext):
 @router.message(Flow.collecting_member_list, F.text)
 async def collect_member_list(msg: Message, state: FSMContext):
     if not is_allowed(msg.from_user.id):
-        await msg.answer("You are not authorized.")
         return
 
     user_id = msg.from_user.id
@@ -278,18 +270,8 @@ async def collect_member_list(msg: Message, state: FSMContext):
             i_status_urls = list(set(u for u in all_urls if "/i/status/" in u))
 
             if i_status_urls:
-                if not has_auth_file():
-                    await bot_instance.send_message(
-                        chat_id,
-                        "auth.json not found. I cannot resolve /i/status/ links right now."
-                    )
-                    resolved_map = {}
-                else:
-                    await bot_instance.send_message(
-                        chat_id,
-                        f"Resolving {len(i_status_urls)} /i/ links..."
-                    )
-                    resolved_map = await resolve_i_status_urls(i_status_urls)
+                await bot_instance.send_message(chat_id, f"Resolving {len(i_status_urls)} /i/ links...")
+                resolved_map = await resolve_i_status_urls(i_status_urls)
             else:
                 resolved_map = {}
 
@@ -322,7 +304,6 @@ async def collect_member_list(msg: Message, state: FSMContext):
 @router.message(Flow.waiting_for_tweet_count, F.text)
 async def get_tweet_count(msg: Message, state: FSMContext):
     if not is_allowed(msg.from_user.id):
-        await msg.answer("You are not authorized.")
         return
 
     text = msg.text.strip()
@@ -340,7 +321,6 @@ async def get_tweet_count(msg: Message, state: FSMContext):
 @router.message(Flow.waiting_for_tweet_links, F.text)
 async def get_tweet_links(msg: Message, state: FSMContext):
     if not is_allowed(msg.from_user.id):
-        await msg.answer("You are not authorized.")
         return
 
     data = await state.get_data()
@@ -362,12 +342,6 @@ async def get_tweet_links(msg: Message, state: FSMContext):
         return
 
     await msg.answer("Scanning... please wait.")
-
-    if not has_auth_file():
-        await msg.answer("auth.json not found. Scanning cannot continue.")
-        await state.clear()
-        await state.set_state(Flow.collecting_member_list)
-        return
 
     all_x_usernames = {m["x"] for m in members}
     all_results = []
@@ -451,7 +425,8 @@ async def main():
     dp.include_router(router)
 
     bot_instance = Bot(BOT_TOKEN)
-    logging.info("Bot is running...")
+    logging.info("Bot instance created successfully!")
+    logging.info("Bot is running... Starting polling now...")
     await dp.start_polling(bot_instance, drop_pending_updates=True)
 
 
