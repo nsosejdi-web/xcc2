@@ -17,7 +17,7 @@ COLLECT_DELAY = 2
 
 # comma separated env var: ALLOWED_USERS=12345,67890
 allowed_users_raw = os.getenv("ALLOWED_USERS", "").strip()
-ALLOWED_USERS = set(5542815933)
+ALLOWED_USERS = {5542815933}
 
 if allowed_users_raw:
     for item in allowed_users_raw.split(","):
@@ -41,14 +41,8 @@ class Flow(StatesGroup):
 # ===================== HELPERS =====================
 
 def ensure_auth_file_exists() -> None:
-    """
-    Ensures auth.json exists.
-    You must provide auth.json in the repo OR generate it another way before run.
-    """
     if not os.path.exists("auth.json"):
-        raise FileNotFoundError(
-            "auth.json not found. Add a valid auth.json file before starting the bot."
-        )
+        logging.warning("auth.json not found. Some features may not work.")
 
 def validate_env() -> None:
     if not BOT_TOKEN:
