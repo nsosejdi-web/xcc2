@@ -427,6 +427,14 @@ async def main():
     bot_instance = Bot(BOT_TOKEN)
     logging.info("Bot instance created successfully!")
     logging.info("Bot is running... Starting polling now...")
+
+    try:
+        await bot_instance.delete_webhook(drop_pending_updates=True)
+        logging.info("Webhook cleared successfully")
+    except Exception as e:
+        logging.warning("Could not delete webhook: %s", e)
+
+    await asyncio.sleep(3)
     await dp.start_polling(bot_instance, drop_pending_updates=True)
 
 
