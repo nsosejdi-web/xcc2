@@ -12,12 +12,12 @@ from scraper import get_comment_status
 from playwright.async_api import async_playwright
 
 # ===================== CONFIG =====================
-BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
+BOT_TOKEN = os.getenv("8436924280:AAEvgqJr-aJFu_YLtL6Ogw0pE1FAgSgdFlY", "").strip()
 COLLECT_DELAY = 2
 
 # comma separated env var: ALLOWED_USERS=12345,67890
 allowed_users_raw = os.getenv("ALLOWED_USERS", "").strip()
-ALLOWED_USERS = set()
+ALLOWED_USERS = set(5542815933)
 
 if allowed_users_raw:
     for item in allowed_users_raw.split(","):
