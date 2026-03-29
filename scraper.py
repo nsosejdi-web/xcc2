@@ -81,7 +81,6 @@ async def click_reply_buttons(page):
             count = await locator.count()
             if count <= 0:
                 return
-
             for i in range(count):
                 el = locator.nth(i)
                 ok = await safe_click(page, el)
@@ -91,31 +90,26 @@ async def click_reply_buttons(page):
         except:
             pass
 
-    # 1) exact / regex text locators
     for key in keywords:
         await try_locator_click(page.locator(f'text="{key}"'), key)
         await try_locator_click(page.locator(f'text=/{re.escape(key)}/i'), key)
 
-    # 2) buttons / links / spans manual scan
     try:
         elements = await page.query_selector_all('div[role="button"], a, span')
         for el in elements:
             parts = []
-
             try:
                 t = await el.inner_text()
                 if t:
                     parts.append(t.strip().lower())
             except:
                 pass
-
             try:
                 a = await el.get_attribute("aria-label")
                 if a:
                     parts.append(a.strip().lower())
             except:
                 pass
-
             try:
                 h = await el.inner_html()
                 if h:
@@ -124,7 +118,6 @@ async def click_reply_buttons(page):
                 pass
 
             combined = " ".join(parts)
-
             if any(k in combined for k in keywords):
                 ok = await safe_click(page, el)
                 if ok:
@@ -136,103 +129,55 @@ async def click_reply_buttons(page):
     return clicked
 
 
-def extract_username_from_href(href: str) -> str | None:
-    """Extract a valid Twitter username from a href string."""
-    if not href:
-        return None
-
-    href = href.strip()
-
-    # skip obvious non-profile routes
-    if href.startswith((
-        "/i/", "/home", "/explore", "/search", "/messages",
-        "/notifications", "/compose", "/settings", "/jobs",
-        "/tos", "/privacy", "/account"
-    )):
-        return None
-
-    parts = href.strip("/").split("/")
-    if not parts:
-        return None
-
-    username = parts[0].lower()
-
-    if username in BLOCKED_USERS:
-        return None
-
-    if USERNAME_RE.fullmatch(username):
-        return username
-
-    return None
-
-
 async def collect_usernames(page, tweet_author: str = None):
-    """
-    Collect usernames ONLY from reply articles (skipping the first article
-    which is the main tweet). Falls back to full-page scan only if no reply
-    articles are found.
-    """
     found = set()
 
-    # --- Strategy 1: reply articles only (skip first article = main tweet) ---
-    try:
-        all_articles = await page.query_selector_all('article')
-        # First article is the main tweet; replies start from index 1
-        reply_articles = all_articles[1:] if len(all_articles) > 1 else []
+    selectors = [
+        'article a[href^="/"][role="link"]',
+        'a[href^="/"][role="link"]',
+        'article a[href^="/"]',
+        'a[href^="/"]',
+    ]
 
-        for article in reply_articles:
+    for selector in selectors:
+        try:
+            elements = await page.query_selector_all(selector)
+        except:
+            continue
+
+        for el in elements:
             try:
-                links = await article.query_selector_all('a[href^="/"]')
+                href = await el.get_attribute("href")
             except:
+                href = None
+
+            if not href:
                 continue
 
-            for el in links:
-                try:
-                    href = await el.get_attribute("href")
-                    username = extract_username_from_href(href)
-                    if username:
-                        # Skip tweet author appearing in reply cards
-                        if tweet_author and username == tweet_author.lower():
-                            continue
-                        found.add(username)
-                except:
-                    pass
+            href = href.strip()
 
-        if found:
-            return found
-    except:
-        pass
+            if href.startswith((
+                "/i/", "/home", "/explore", "/search", "/messages",
+                "/notifications", "/compose", "/settings", "/jobs",
+                "/tos", "/privacy", "/account"
+            )):
+                continue
 
-    # --- Strategy 2: fallback — role=link scoped to articles ---
-    try:
-        elements = await page.query_selector_all('article a[href^="/"][role="link"]')
-        for el in elements:
-            try:
-                href = await el.get_attribute("href")
-                username = extract_username_from_href(href)
-                if username:
-                    found.add(username)
-            except:
-                pass
+            parts = href.strip("/").split("/")
+            if not parts:
+                continue
 
-        if found:
-            return found
-    except:
-        pass
+            username = parts[0].lower()
 
-    # --- Strategy 3: last resort — full page scan ---
-    try:
-        elements = await page.query_selector_all('a[href^="/"]')
-        for el in elements:
-            try:
-                href = await el.get_attribute("href")
-                username = extract_username_from_href(href)
-                if username:
-                    found.add(username)
-            except:
-                pass
-    except:
-        pass
+            if username in BLOCKED_USERS:
+                continue
+
+            # filter out tweet author — they appear on every reply card
+            if tweet_author and username == tweet_author.lower():
+                continue
+
+            if USERNAME_RE.fullmatch(username):
+                found.add(username)
 
     return found
 
@@ -240,7 +185,6 @@ async def collect_usernames(page, tweet_author: str = None):
 async def get_comment_status(tweet_url, usernames, visible=False):
     print("📱 Mobile View Mode — strict reply scan with spam click")
 
-    # Extract tweet author from URL so we can filter them out of reply collection
     tweet_author = None
     author_match = re.search(r'x\.com/([^/]+)/status/', tweet_url)
     if author_match:
@@ -271,7 +215,6 @@ async def get_comment_status(tweet_url, usernames, visible=False):
         try:
             print(f"🌐 Opening Tweet: {tweet_url}")
             await page.goto(tweet_url, wait_until="domcontentloaded", timeout=60000)
-
             print("⏳ Waiting initial 10 seconds...")
             await asyncio.sleep(10)
         except PlaywrightTimeoutError:
@@ -287,13 +230,11 @@ async def get_comment_status(tweet_url, usernames, visible=False):
 
         print("🔄 Scanning replies...")
 
-        # initial exact spam click
         try:
             await click_exact_spam_button(page)
         except Exception as e:
             print("Initial spam click failed:", e)
 
-        # initial generic button click
         try:
             clicked = await click_reply_buttons(page)
             if clicked:
@@ -304,28 +245,22 @@ async def get_comment_status(tweet_url, usernames, visible=False):
         while scroll_pass < 70:
             scroll_pass += 1
 
-            # before collect
             clicked_1 = await click_reply_buttons(page)
 
             current_found = await collect_usernames(page, tweet_author)
             repliers.update(current_found)
 
-            # main scroll
             await page.mouse.wheel(0, 900)
-            await asyncio.sleep(2.4)
+            await asyncio.sleep(2.0)
 
-            # try clicking again after big scroll
             clicked_2 = await click_reply_buttons(page)
 
-            # smaller step scrolls
-            for _ in range(5):
+            for _ in range(4):
                 await page.mouse.wheel(0, 420)
-                await asyncio.sleep(0.9)
+                await asyncio.sleep(0.8)
 
-            # try again after mini scrolls
             clicked_3 = await click_reply_buttons(page)
 
-            # collect after scrolling/clicking
             current_found = await collect_usernames(page, tweet_author)
             repliers.update(current_found)
 
@@ -341,7 +276,6 @@ async def get_comment_status(tweet_url, usernames, visible=False):
                 idle_rounds = 0
                 last_count = len(repliers)
 
-            # if we are stuck, try exact spam click once more
             if idle_rounds >= 2:
                 try:
                     again = await click_exact_spam_button(page)
@@ -351,14 +285,14 @@ async def get_comment_status(tweet_url, usernames, visible=False):
                 except:
                     pass
 
-            if idle_rounds >= 3:
-                print("🔻 No new usernames for 3 rounds. Stopping.")
+            # stop after 4 consecutive idle rounds
+            if idle_rounds >= 4:
+                print("🔻 No new usernames for 4 rounds. Stopping.")
                 break
 
         await context.close()
         await browser.close()
 
-    # save usernames
     with open("repliers_list.txt", "w", encoding="utf-8") as f:
         for u in sorted(repliers):
             f.write(f"@{u}\n")
